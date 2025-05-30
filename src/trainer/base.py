@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 class FinetuneTrainer(Trainer):
-    def __init__(self, evaluator=None, template_args=None, cl=None, *args, **kwargs):
-        self.evaluator = evaluator
+    def __init__(self, evaluators=None, template_args=None, cl=None, *args, **kwargs):
+        self.evaluators = evaluators
         self.template_args = template_args
         self.cl = cl
         if self.cl == 'superloss':
