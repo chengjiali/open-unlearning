@@ -47,10 +47,10 @@ def main(cfg: DictConfig):
             tokenizer=tokenizer,
         )
 
-    if not hasattr(trainer_cfg, 'cl') or trainer_cfg.cl is None or trainer_cfg.cl == 'none':
-        cl = 'none'
+    if not hasattr(trainer_cfg, 'cl') or trainer_cfg.cl is None or trainer_cfg.cl == 'none' or trainer_cfg.cl.method == 'none':
+        cl_cfg = None
     else:
-        cl = trainer_cfg.cl
+        cl_cfg = trainer_cfg.cl
 
     trainer, trainer_args = load_trainer(
         trainer_cfg=trainer_cfg,
@@ -61,7 +61,7 @@ def main(cfg: DictConfig):
         data_collator=collator,
         evaluators=evaluators,
         template_args=template_args,
-        cl=cl
+        cl_cfg=cl_cfg
     )
 
     if trainer_args.do_train:

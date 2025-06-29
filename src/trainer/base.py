@@ -15,13 +15,13 @@ logger = logging.getLogger(__name__)
 
 
 class FinetuneTrainer(Trainer):
-    def __init__(self, evaluators=None, template_args=None, cl=None, *args, **kwargs):
+    def __init__(self, evaluators=None, template_args=None, cl_cfg=None, *args, **kwargs):
         self.evaluators = evaluators
         self.template_args = template_args
-        self.cl = cl
-        if self.cl == 'superloss':
+        self.cl_cfg = cl_cfg
+        if self.cl_cfg.method == 'superloss':
             # Initialize SuperLoss calculator for Curriculum Learning
-            self.super_loss = SuperLoss('sl', lam=10, mode='avg')
+            self.super_loss = SuperLoss('sl', lam=cl_cfg.lam, C=cl_cfg.C, mode='avg')
         super().__init__(*args, **kwargs)
 
     def evaluate(

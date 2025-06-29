@@ -38,12 +38,12 @@ if is_deepspeed_available():
 
 class UnlearnTrainer(FinetuneTrainer):
     def compute_loss(self, model, inputs, return_outputs=False):
-        if self.cl is None or self.cl == 'none':
+        if self.cl_cfg is None or self.cl_cfg == 'none' or self.cl_cfg.method == 'none':
             return self.compute_loss_normal(model, inputs, return_outputs)
-        elif self.cl == 'superloss':
+        elif self.cl_cfg.method == 'superloss':
             return self.compute_loss_superloss(model, inputs, return_outputs)
         else:
-            raise ValueError(f"{self.cl} should be None or in ['none', 'superloss']")
+            raise ValueError(f"{self.cl_cfg} should be None or in ['none', 'superloss']")
 
     def calculate_superloss(self, per_sample_loss):
         conf, tau, tau_adjusted = self.super_loss(per_sample_loss, None, None)
