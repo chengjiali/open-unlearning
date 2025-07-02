@@ -9,7 +9,7 @@ args:
   logging_steps: 5
   output_dir: ${paths.output_dir}
   logging_dir: ${trainer.args.output_dir}/logs
-  report_to: tensorboard
+  report_to: wandb
   ddp_find_unused_parameters: None
   gradient_checkpointing: True
   optim: paged_adamw_32bit
@@ -24,5 +24,8 @@ args:
   seed: 0
 cl:
   method: none
-  cl_lam: 1
-  cl_C: 2
+  lam: 1
+  C: 2
+  difficulty_metric: loss
+  data_name: tofu
+  split: forget01

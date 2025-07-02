@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from evals.metrics import get_metrics
+import wandb
 
 logger = logging.getLogger("evaluator")
 
@@ -108,5 +109,8 @@ class Evaluator:
                 logger.info(f"Result for metric {metric_name}:\t{result['agg_value']}")
             self.save_logs(logs, logs_file_path)
             self.save_logs(self.summarize(logs), summary_file_path)
+
+        summary = self.summarize(logs)
+        wandb.log({f"test/{k}": v for k, v in summary.items()})
 
         return self.summarize(logs)

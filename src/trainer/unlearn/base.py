@@ -37,22 +37,6 @@ if is_deepspeed_available():
 
 
 class UnlearnTrainer(FinetuneTrainer):
-    def compute_loss(self, model, inputs, return_outputs=False):
-        if self.cl_cfg is None or self.cl_cfg == 'none' or self.cl_cfg.method == 'none':
-            return self.compute_loss_normal(model, inputs, return_outputs)
-        elif self.cl_cfg.method == 'superloss':
-            return self.compute_loss_superloss(model, inputs, return_outputs)
-        else:
-            raise ValueError(f"{self.cl_cfg} should be None or in ['none', 'superloss']")
-
-    def calculate_superloss(self, per_sample_loss):
-        conf, tau, tau_adjusted = self.super_loss(per_sample_loss, None, None)
-        tau = [tau] * per_sample_loss.shape[0]
-        tau_adjusted = [tau_adjusted] * per_sample_loss.shape[0]
-        sl_loss = per_sample_loss * conf
-
-        return sl_loss
-
     # Adapted from Huggingface DPO Trainer: https://github.com/huggingface/accelerate/blob/739b135f8367becb67ffaada12fe76e3aa60fefd/src/accelerate/accelerator.py#L1473
     def _prepare_deepspeed(self, model):
         # Adapted from accelerate: https://github.com/huggingface/accelerate/blob/739b135f8367becb67ffaada12fe76e3aa60fefd/src/accelerate/accelerator.py#L1473

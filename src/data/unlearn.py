@@ -1,3 +1,4 @@
+import os
 import torch
 from torch.utils.data import Dataset
 
@@ -16,13 +17,37 @@ class ForgetRetainDataset(Dataset):
         self.retain = retain
         self.anchor = anchor
 
+        self.selected_indices = list(range(len(forget)))    # Trainer will create a data loader before training starts.
+                                                            # Later on epoch starts, this will be updated by self.curriculum()
+
+    def curriculum(self, curr_epoch, num_train_epochs, cl_method, sample_difficulty):
+        # Curriculum configuration
+        num_chunks = num_train_epochs // 2  # 5 chunks for 10 epochs
+        if cl_method == 'hard_to_easy':
+            descending = True
+        elif cl_method == 'easy_to_hard':
+            descending=False
+        else:
+            raise
+
+        # Current training epoch
+        curr_epoch = int(curr_epoch)    # curr_epoch can be float
+        max_stage = min(num_chunks, (curr_epoch // 2) + 1)
+
+        # Sort by difficulty and create curriculum chunks
+        sorted_indices = torch.argsort(sample_difficulty, descending=descending)
+        chunks = torch.chunk(sorted_indices, num_chunks)
+        self.selected_indices = torch.cat(chunks[:max_stage]).tolist()
+        if int(os.environ.get('RANK')) == 0:
+            print(f"[Curriculum]: Epoch {curr_epoch} | Using {max_stage}/{num_chunks} chunks | total samples: {len(self.selected_indices)}")
+
     def __len__(self):
         """Ensures the sampled dataset matches the anchor dataset's length."""
         if self.anchor == "forget":
             assert self.forget is not None, ValueError(
                 "forget dataset can't be None when anchor=forget"
             )
-            return len(self.forget)
+            return len([self.forget[i] for i in self.selected_indices])
         elif self.anchor == "retain":
             assert self.retain is not None, ValueError(
                 "retain dataset can't be None when anchor=retain"

@@ -1,14 +1,32 @@
 #!/bin/bash
 
+export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
+echo "Master Port: $MASTER_PORT"
+
+per_device_train_batch_size=4
+gradient_accumulation_steps=2
+
+model=zephyr-7b-beta
+
+data_splits=(
+    "cyber"
+    "bio"
+)
+
+trainers=(
+    "GradAscent"
+    "GradDiff"
+    "NPO"
+    "SimNPO"
+)
+
+
+#!/bin/bash
+
 
 export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
 echo "Master Port: $MASTER_PORT"
 
-models=(
-    # "Llama-3.2-1B-Instruct"
-    # "Llama-3.2-3B-Instruct"
-    "Llama-3.1-8B-Instruct"
-)
 trainers=(
     "GradAscent"
     "GradDiff"
@@ -21,36 +39,31 @@ cls=(
     "easy_to_hard"
     "hard_to_easy"
 )
-splits=(
-    "forget01 holdout01 retain99"
-    "forget05 holdout05 retain95"
-    "forget10 holdout10 retain90"
-)
 
+model=zephyr-7b-beta
+
+data_splits=(
+    "cyber"
+    "bio"
+)
 
 
 per_device_train_batch_size=4 # on two gpus would make effective batch size 32
 gradient_accumulation_steps=2
 
 
-for split in "${splits[@]}"; do
-    forget_split=$(echo $split | cut -d' ' -f1)
-    holdout_split=$(echo $split | cut -d' ' -f2)
-    retain_split=$(echo $split | cut -d' ' -f3)
+for data_split in "${data_splitsZ[@]}"; do
 
     for model in "${models[@]}"; do
         for trainer in "${trainers[@]}"; do
-            model_path=open-unlearning/tofu_${model}_full
 
             TRAIN_CMD="CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
             src/train.py --config-name=unlearn.yaml \
-            experiment=unlearn/tofu/default.yaml \
+            experiment=unlearn/wmdp/default.yaml \
             trainer=${trainer} \
             model=${model} \
-            forget_split=${forget_split} \
-            retain_split=${retain_split} \
-            model.model_args.pretrained_model_name_or_path=${model_path} \
-            retain_logs_path=saves/eval/tofu_${model}_${retain_split}/TOFU_EVAL.json \
+            data_split=${data_split} \
+            retain_logs_path=saves/eval/wmdp_${model}_${data_split}/WMDP_EVAL.json \
             trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
             trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
             trainer.args.ddp_find_unused_parameters=true \
@@ -58,20 +71,19 @@ for split in "${splits[@]}"; do
             trainer.args.eval_strategy=no"
 
             EVAL_CMD="CUDA_VISIBLE_DEVICES=4 python src/eval.py \
-            experiment=eval/tofu/default.yaml \
+            experiment=eval/wmdp/default.yaml \
             model=${model} \
-            forget_split=${forget_split} \
-            holdout_split=${holdout_split} \
-            retain_logs_path=saves/eval/tofu_${model}_${retain_split}/TOFU_EVAL.json"
+            data_split=${data_split} \
+            retain_logs_path=saves/eval/wmdp_${model}_${data_split}/WMDP_EVAL.json"
 
             for cl in "${cls[@]}"; do
 
                 # CL = SuperLoss
                 if [[ "$cl" == "superloss" ]]; then
                     for lam in 0.1 1 10; do
-                        task_name=${cl}/C_2_lam_${lam}/tofu_${model}_${forget_split}_${trainer}
+                        task_name=${cl}/C_2_lam_${lam}/wmdp_${model}_${data_split}_${trainer}
 
-                        if [ ! -f saves/unlearn/"${task_name}"/evals/TOFU_SUMMARY.json ]; then
+                        if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
                             if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                                 echo "${task_name}" "Model Not Found"
                                 
@@ -96,9 +108,9 @@ for split in "${splits[@]}"; do
                 # Easy to hard / hard to easy
                 elif [[ "$cl" == "easy_to_hard" || "$cl" == "hard_to_easy" ]]; then
                     for metric in loss prob exact_mem extraction_strength; do
-                        task_name=${cl}/${metric}/tofu_${model}_${forget_split}_${trainer}
+                        task_name=${cl}/${metric}/wmdp_${model}_${data_split}_${trainer}
 
-                        if [ ! -f saves/unlearn/"${task_name}"/evals/TOFU_SUMMARY.json ]; then
+                        if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
                             if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                                 echo "${task_name}" "Model Not Found"
 
@@ -106,8 +118,8 @@ for split in "${splits[@]}"; do
                                 task_name=${task_name} \
                                 trainer.cl.method=${cl} \
                                 trainer.cl.difficulty_metric=${metric} \
-                                trainer.cl.data_name=tofu \
-                                trainer.cl.split=${forget_split}
+                                trainer.cl.data_name=wmdp \
+                                trainer.cl.split=${data_split}
                             fi
 
                             if [ -f saves/unlearn/"${task_name}"/model.safetensors ] || [ -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
@@ -123,10 +135,9 @@ for split in "${splits[@]}"; do
                 
                 # No CL
                 elif [[ "$cl" == "none" ]]; then 
-                    task_name=${cl}/tofu_${model}_${forget_split}_${trainer}
-                    model_path=open-unlearning/tofu_${model}_full
+                    task_name=${cl}/wmdp_${model}_${data_split}_${trainer}
 
-                    if [ ! -f saves/unlearn/"${task_name}"/evals/TOFU_SUMMARY.json ]; then
+                    if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
                         if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                             echo "${task_name}" "Model Not Found"
 
