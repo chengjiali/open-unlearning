@@ -1,28 +1,5 @@
 #!/bin/bash
 
-export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
-echo "Master Port: $MASTER_PORT"
-
-per_device_train_batch_size=4
-gradient_accumulation_steps=2
-
-model=zephyr-7b-beta
-
-data_splits=(
-    "cyber"
-    "bio"
-)
-
-trainers=(
-    "GradAscent"
-    "GradDiff"
-    "NPO"
-    "SimNPO"
-)
-
-
-#!/bin/bash
-
 
 export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
 echo "Master Port: $MASTER_PORT"
@@ -39,9 +16,7 @@ cls=(
     "easy_to_hard"
     "hard_to_easy"
 )
-
 model=zephyr-7b-beta
-
 data_splits=(
     "cyber"
     "bio"

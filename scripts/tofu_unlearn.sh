@@ -4,11 +4,6 @@
 export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
 echo "Master Port: $MASTER_PORT"
 
-models=(
-    # "Llama-3.2-1B-Instruct"
-    # "Llama-3.2-3B-Instruct"
-    "Llama-3.1-8B-Instruct"
-)
 trainers=(
     "GradAscent"
     "GradDiff"
@@ -20,6 +15,11 @@ cls=(
     "superloss"
     "easy_to_hard"
     "hard_to_easy"
+)
+models=(
+    # "Llama-3.2-1B-Instruct"
+    # "Llama-3.2-3B-Instruct"
+    "Llama-3.1-8B-Instruct"
 )
 splits=(
     "forget01 holdout01 retain99"

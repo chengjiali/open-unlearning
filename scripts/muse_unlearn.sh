@@ -4,179 +4,135 @@ export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)
 echo "Master Port: $MASTER_PORT"
 
 
-per_device_train_batch_size=4
-gradient_accumulation_steps=2
-
-
-model=Llama-2-7b-hf
-
-data_splits=(
-    "News"
-    "Books"
-)
-
 trainers=(
     "GradAscent"
     "GradDiff"
     "NPO"
     "SimNPO"
 )
-
 cls=(
+    "none"
     "superloss"
+    "easy_to_hard"
+    "hard_to_easy"
+)
+model=Llama-2-7b-hf
+data_splits=(
+    "News"
+    "Books"
 )
 
-# #########################################################
-# #################### MUSE Unlearning ####################
-# #########################################################
+
+per_device_train_batch_size=4 # on two gpus would make effective batch size 32
+gradient_accumulation_steps=2
 
 
-for data_split in "${data_splits[@]}"; do
-    for trainer in "${trainers[@]}"; do
-        for cl in "${cls[@]}"; do
+for data_split in "${data_splitsZ[@]}"; do
 
-            task_name=muse_${model}_${data_split}_${trainer}_${cl}
-            C=2
-            lam=0.1
-            out_dir=superloss_C_${C}_lam_${lam}
+    for model in "${models[@]}"; do
+        for trainer in "${trainers[@]}"; do
 
-            if [ ! -f saves/${out_dir}/"${task_name}"/model.safetensors ] && [ ! -f saves/${out_dir}/"${task_name}"/model.safetensors.index.json ]; then
-                echo "${task_name}" "Model Not Found"
+            TRAIN_CMD="CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
+            src/train.py --config-name=unlearn.yaml \
+            experiment=unlearn/wmdp/default.yaml \
+            trainer=${trainer} \
+            model=${model} \
+            data_split=${data_split} \
+            retain_logs_path=saves/eval/wmdp_${model}_${data_split}/WMDP_EVAL.json \
+            trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
+            trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
+            trainer.args.ddp_find_unused_parameters=true \
+            trainer.args.gradient_checkpointing=true \
+            trainer.args.eval_strategy=no"
 
-                CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
-                src/train.py --config-name=unlearn.yaml \
-                experiment=unlearn/muse/default.yaml \
-                trainer.cl=${cl} \
-                model=${model} \
-                data_split=${data_split} \
-                trainer=${trainer} \
-                task_name=${task_name} \
-                paths.output_dir=saves/${out_dir}/${task_name}/ \
-                retain_logs_path=saves/eval/muse_${model}_${data_split}_retrain/MUSE_EVAL.json \
-                trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
-                trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
-                trainer.args.ddp_find_unused_parameters=true \
-                trainer.args.gradient_checkpointing=true
-            fi
+            EVAL_CMD="CUDA_VISIBLE_DEVICES=4 python src/eval.py \
+            experiment=eval/wmdp/default.yaml \
+            model=${model} \
+            data_split=${data_split} \
+            retain_logs_path=saves/eval/wmdp_${model}_${data_split}/WMDP_EVAL.json"
 
-            if [ ! -f saves/${out_dir}/"${task_name}"/model.safetensors ] || [ ! -f saves/${out_dir}/"${task_name}"/model.safetensors.index.json ]; then
-                if [ ! -f saves/${out_dir}/"${task_name}"/evals/MUSE_SUMMARY.json ]; then
-                    echo "${task_name}" "Eval Not Found"
+            for cl in "${cls[@]}"; do
 
-                    CUDA_VISIBLE_DEVICES=4 python src/eval.py \
-                    experiment=eval/muse/default.yaml \
-                    data_split=${data_split} \
-                    task_name=${task_name} \
-                    model=${model} \
-                    model.model_args.pretrained_model_name_or_path=saves/${out_dir}/${task_name} \
-                    paths.output_dir=saves/${out_dir}/${task_name}/evals \
-                    retain_logs_path=saves/eval/muse_${model}_${data_split}_retrain/MUSE_EVAL.json
-                fi
-            fi
-        done
-    done
-done
+                # CL = SuperLoss
+                if [[ "$cl" == "superloss" ]]; then
+                    for lam in 0.1 1 10; do
+                        task_name=${cl}/C_2_lam_${lam}/wmdp_${model}_${data_split}_${trainer}
 
+                        if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
+                            if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
+                                echo "${task_name}" "Model Not Found"
+                                
+                                eval ${TRAIN_CMD} \
+                                task_name=${task_name} \
+                                trainer.cl.method=${cl} \
+                                trainer.cl.lam=${lam} \
+                                trainer.cl.C=2
+                            fi
 
+                            if [ -f saves/unlearn/"${task_name}"/model.safetensors ] || [ -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
+                                echo "${task_name}" "Eval Not Found"
+                                
+                                eval ${EVAL_CMD} \
+                                model.model_args.pretrained_model_name_or_path=saves/unlearn/${task_name} \
+                                task_name=${task_name} \
+                                paths.output_dir=saves/unlearn/${task_name}/evals
+                            fi
+                        fi
+                    done
 
-# #########################################################
-# ########### MUSE News Unlearning Scalability ############
-# #########################################################
+                # Easy to hard / hard to easy
+                elif [[ "$cl" == "easy_to_hard" || "$cl" == "hard_to_easy" ]]; then
+                    for metric in loss prob exact_mem extraction_strength; do
+                        task_name=${cl}/${metric}/wmdp_${model}_${data_split}_${trainer}
 
+                        if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
+                            if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
+                                echo "${task_name}" "Model Not Found"
 
-for data_split in "${data_splits[@]}"; do
-    for trainer in "${trainers[@]}"; do
-        for scal in "forget_1" "forget_2" "forget_3" "forget_4"; do
-            
-            task_name=muse_${model}_${data_split}_${trainer}_scal_${scal}_${cl} \
-            
-            # if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
-            #     echo "${task_name}" "Model Not Found"
+                                eval ${TRAIN_CMD} \
+                                task_name=${task_name} \
+                                trainer.cl.method=${cl} \
+                                trainer.cl.difficulty_metric=${metric} \
+                                trainer.cl.data_name=wmdp \
+                                trainer.cl.split=${data_split}
+                            fi
 
-            #     CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
-            #     src/train.py --config-name=unlearn.yaml \
-            #     experiment=unlearn/muse/scalability.yaml \
-            #     trainer.cl=${cl} \
-            #     model=${model} \
-            #     data_split=${data_split} \
-            #     forget_split=${scal} \
-            #     trainer=${trainer} \
-            #     task_name=${task_name} \
-            #     retain_logs_path=saves/eval/muse_${model}_${data_split}_retrain/MUSE_EVAL.json \
-            #     trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
-            #     trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
-            #     trainer.args.ddp_find_unused_parameters=true \
-            #     trainer.args.gradient_checkpointing=true
-            # fi
-
-            # if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] || [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
-            #     echo "${task_name}" "Model Not Found"
-            #     if [ ! -f saves/unlearn/"${task_name}"/evals/MUSE_SUMMARY.json ]; then
-            #         echo "${task_name}" "Eval Not Found"
-
-            #         CUDA_VISIBLE_DEVICES=4 python src/eval.py \
-            #         experiment=eval/muse/default.yaml \
-            #         data_split=${data_split} \
-            #         task_name=${task_name} \
-            #         model=${model} \
-            #         model.model_args.pretrained_model_name_or_path=saves/unlearn/${task_name} \
-            #         paths.output_dir=saves/unlearn/${task_name}/evals \
-            #         retain_logs_path=saves/eval/muse_${model}_${data_split}_retrain/MUSE_EVAL.json
-            #     fi
-            # fi
-        done
-    done
-done
-
-
-
-#########################################################
-########### MUSE News Unlearning sustainability #########
-#########################################################
-
-
-for data_split in "${data_splits[@]}"; do
-    for trainer in "${trainers[@]}"; do
-        model_path=muse-bench/MUSE-${data_split}_target
-        for sust in "forget_1" "forget_2" "forget_3" "forget_4"; do
-            
-            task_name=muse_${model}_${data_split}_${trainer}_sust_${sust}_${cl}
-
-            # if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
-            #     echo "${task_name}" "Model Not Found"
+                            if [ -f saves/unlearn/"${task_name}"/model.safetensors ] || [ -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
+                                echo "${task_name}" "Eval Not Found"
+                                
+                                eval ${EVAL_CMD} \
+                                model.model_args.pretrained_model_name_or_path=saves/unlearn/${task_name} \
+                                task_name=${task_name} \
+                                paths.output_dir=saves/unlearn/${task_name}/evals
+                            fi
+                        fi
+                    done
                 
-            #     CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
-            #     src/train.py --config-name=unlearn.yaml \
-            #     experiment=unlearn/muse/sustainabilty.yaml \
-            #     trainer.cl=${cl} \
-            #     model=${model} \
-            #     model.model_args.pretrained_model_name_or_path=${model_path} \
-            #     data_split=${data_split} \
-            #     trainer=${trainer} \
-            #     task_name=${task_name} \
-            #     retain_logs_path=saves/eval/muse_${model}_${data_split}_retrain/MUSE_EVAL.json \
-            #     trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
-            #     trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
-            #     trainer.args.ddp_find_unused_parameters=true \
-            #     trainer.args.gradient_checkpointing=true
-            # fi
+                # No CL
+                elif [[ "$cl" == "none" ]]; then 
+                    task_name=${cl}/wmdp_${model}_${data_split}_${trainer}
 
-            # if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] || [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
-            #     if [ ! -f saves/unlearn/"${task_name}"/evals/MUSE_SUMMARY.json ]; then
-            #         echo "${task_name}" "Eval Not Found"
+                    if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
+                        if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
+                            echo "${task_name}" "Model Not Found"
 
-            #         CUDA_VISIBLE_DEVICES=4 python src/eval.py \
-            #         experiment=eval/muse/default.yaml \
-            #         data_split=${data_split} \
-            #         task_name=${task_name} \
-            #         model=${model} \
-            #         model.model_args.pretrained_model_name_or_path=saves/unlearn/${task_name} \
-            #         paths.output_dir=saves/unlearn/${task_name}/evals \
-            #         retain_logs_path=saves/eval/muse_${model}_${data_split}_retrain/MUSE_EVAL.json
-            #     fi
-            # fi
+                            ${TRAIN_CMD} trainer.cl.method="none"
+                        fi
 
-            model_path=saves/unlearn/${task_name}
+                        if [ -f saves/unlearn/"${task_name}"/model.safetensors ] || [ -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
+                            echo "${task_name}" "Eval Not Found"
+                            
+                            ${EVAL_CMD} \
+                            model.model_args.pretrained_model_name_or_path=saves/unlearn/${task_name} \
+                            task_name=${task_name} \
+                            paths.output_dir=saves/unlearn/${task_name}/evals
+                        fi
+                    fi
+                else
+                    echo "Unsupported CL method"
+                    exit 1
+                fi
+            done
         done
     done
 done

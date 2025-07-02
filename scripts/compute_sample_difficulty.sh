@@ -51,7 +51,6 @@ done
 
 ## WMDP
 model=zephyr-7b-beta
-
 data_splits=(
     "cyber"
     "bio"
