@@ -51,7 +51,8 @@ def exact_mem(model, tokenizer, batch):
                 "EM score for an instance is marked None, due to "
                 "tokenization issues that resulted in no valid target tokens."
             )
-            em_batch.append({"score": None})
+            # em_batch.append({"score": None})
+            em_batch.append({"score": 0})
         else:
             preds = torch.argmax(log_probs, dim=-1)
             em_score = (preds == labels).sum() / valid_len
@@ -109,17 +110,15 @@ class EvaluatorComputeSampleDifficulty:
             self.collator = DataCollatorForSupervisedDataset(self.tokenizer, padding_side="right", index="index")
 
         elif dataset_name == 'muse':
-            if self.data_split.lower() == 'books':
-                max_length = 512
-            elif self.data_split.lower() == 'news':
-                max_length = 2048
-
+            max_length = 2048
             hf_args = {"name": 'raw', 'path': f'muse-bench/MUSE-{self.data_split}', 'split': 'forget'}
-            dataset = CompletionDataset(
-                hf_args, self.template_args, self.tokenizer, max_length=max_length, predict_with_generate=False, insert_space=True)
+            # dataset = CompletionDataset(
+            #     hf_args, self.template_args, self.tokenizer, max_length=max_length, predict_with_generate=False, insert_space=True)
+            dataset = PretrainingDataset(
+                hf_args, self.template_args, self.tokenizer, max_length=max_length)
             dataset_gen = QADataset(
                 hf_args, self.template_args, self.tokenizer, max_length=max_length, predict_with_generate=True)
-            self.collator = DataCollatorForSupervisedDataset(self.tokenizer, padding_side="left", index="index")
+            self.collator = DataCollatorForSupervisedDataset(self.tokenizer, padding_side="left")
 
         elif dataset_name == 'wmdp':
             hf_args = {'path': 'text', 'data_files': f'data/wmdp/wmdp-corpora/{self.data_split}-forget-corpus.jsonl', 'split': 'train'}
@@ -127,7 +126,7 @@ class EvaluatorComputeSampleDifficulty:
                 hf_args, self.template_args, self.tokenizer, max_length=512)
             dataset_gen = PretrainingDataset(
                 hf_args, self.template_args, self.tokenizer, max_length=512)
-            self.collator = DataCollatorForSupervisedDataset(self.tokenizer, padding_side="left",)# index="index")
+            self.collator = DataCollatorForSupervisedDataset(self.tokenizer, padding_side="left",)
 
 
         self.metrics = {

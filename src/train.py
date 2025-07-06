@@ -14,7 +14,7 @@ from trainer.utils import seed_everything
 def wandb_setup(cfg):
     parts = cfg.get('task_name').strip().split('/')
     cl_method = parts[0]
-    data, model, split, unlearn_method = parts[-1]
+    data, model, split, unlearn_method = parts[-1].split('_')
 
     project = 'Curriculum Unlearning'
     group = [data, split, model, unlearn_method]
@@ -24,8 +24,8 @@ def wandb_setup(cfg):
     if cl_method == 'none':
         name += [cl_method,]
     elif cl_method == 'superloss':
-        C = re.search(r'C_(\d+)', parts[1])
-        lam = re.search(r'lam_([\d.]+)', parts[1])
+        C = re.search(r'C_(\d+)', parts[1]).group(1)
+        lam = re.search(r'lam_([\d.]+)', parts[1]).group(1)
         name += [cl_method, C, lam]
         tags += [
             f"C={C}",
@@ -77,13 +77,13 @@ def main(cfg: DictConfig):
     # Get Evaluators
     evaluators = None
     eval_cfgs = cfg.get("eval", None)
-    if eval_cfgs:
-        evaluators = get_evaluators(
-            eval_cfgs=eval_cfgs,
-            template_args=template_args,
-            model=model,
-            tokenizer=tokenizer,
-        )
+    # if eval_cfgs:
+    #     evaluators = get_evaluators(
+    #         eval_cfgs=eval_cfgs,
+    #         template_args=template_args,
+    #         model=model,
+    #         tokenizer=tokenizer,
+    #     )
 
     if not hasattr(trainer_cfg, 'cl') or trainer_cfg.cl is None or trainer_cfg.cl == 'none' or trainer_cfg.cl.method == 'none':
         cl_cfg = None
