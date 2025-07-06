@@ -39,7 +39,7 @@ class ForgetRetainDataset(Dataset):
         chunks = torch.chunk(sorted_indices, num_chunks)
         self.selected_indices = torch.cat(chunks[:max_stage]).tolist()
         if int(os.environ.get('RANK')) == 0:
-            print(f"[Curriculum]: Epoch {curr_epoch} | Using {max_stage}/{num_chunks} chunks | total samples: {len(self.selected_indices)}")
+            print(f"[Curriculum]: Epoch {curr_epoch} | Using {max_stage}/{num_chunks} chunks | {len(self.selected_indices)}/{len(sorted_indices)} samples")
 
     def __len__(self):
         """Ensures the sampled dataset matches the anchor dataset's length."""
