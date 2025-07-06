@@ -9,6 +9,12 @@ trainers=(
     "GradDiff"
     "NPO"
     "SimNPO"
+    "RMU"
+    "UNDIAL"
+    "AltPO"
+    "SatImp"
+    "WGA"
+    "CEU"
 )
 cls=(
     "none"
@@ -16,7 +22,9 @@ cls=(
     "easy_to_hard"
     "hard_to_easy"
 )
-model=zephyr-7b-beta
+models=(
+    zephyr-7b-beta
+)
 data_splits=(
     "cyber"
     "bio"
@@ -27,7 +35,7 @@ per_device_train_batch_size=4 # on two gpus would make effective batch size 32
 gradient_accumulation_steps=2
 
 
-for data_split in "${data_splitsZ[@]}"; do
+for data_split in "${data_splits[@]}"; do
 
     for model in "${models[@]}"; do
         for trainer in "${trainers[@]}"; do
@@ -38,7 +46,6 @@ for data_split in "${data_splitsZ[@]}"; do
             trainer=${trainer} \
             model=${model} \
             data_split=${data_split} \
-            retain_logs_path=saves/eval/wmdp_${model}_${data_split}/WMDP_EVAL.json \
             trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
             trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
             trainer.args.ddp_find_unused_parameters=true \
@@ -48,8 +55,7 @@ for data_split in "${data_splitsZ[@]}"; do
             EVAL_CMD="CUDA_VISIBLE_DEVICES=4 python src/eval.py \
             experiment=eval/wmdp/default.yaml \
             model=${model} \
-            data_split=${data_split} \
-            retain_logs_path=saves/eval/wmdp_${model}_${data_split}/WMDP_EVAL.json"
+            data_split=${data_split}"
 
             for cl in "${cls[@]}"; do
 
@@ -116,13 +122,13 @@ for data_split in "${data_splitsZ[@]}"; do
                         if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                             echo "${task_name}" "Model Not Found"
 
-                            ${TRAIN_CMD} trainer.cl.method="none"
+                            eval ${TRAIN_CMD} trainer.cl.method="none"
                         fi
 
                         if [ -f saves/unlearn/"${task_name}"/model.safetensors ] || [ -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                             echo "${task_name}" "Eval Not Found"
                             
-                            ${EVAL_CMD} \
+                            eval ${EVAL_CMD} \
                             model.model_args.pretrained_model_name_or_path=saves/unlearn/${task_name} \
                             task_name=${task_name} \
                             paths.output_dir=saves/unlearn/${task_name}/evals

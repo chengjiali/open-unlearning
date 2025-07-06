@@ -9,6 +9,12 @@ trainers=(
     "GradDiff"
     "NPO"
     "SimNPO"
+    "RMU"
+    "UNDIAL"
+    "AltPO"
+    "SatImp"
+    "WGA"
+    "CEU"
 )
 cls=(
     "none"
@@ -130,13 +136,13 @@ for split in "${splits[@]}"; do
                         if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                             echo "${task_name}" "Model Not Found"
 
-                            ${TRAIN_CMD} trainer.cl.method="none"
+                            eval ${TRAIN_CMD} trainer.cl.method="none"
                         fi
 
                         if [ -f saves/unlearn/"${task_name}"/model.safetensors ] || [ -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                             echo "${task_name}" "Eval Not Found"
                             
-                            ${EVAL_CMD} \
+                            eval ${EVAL_CMD} \
                             model.model_args.pretrained_model_name_or_path=saves/unlearn/${task_name} \
                             task_name=${task_name} \
                             paths.output_dir=saves/unlearn/${task_name}/evals
