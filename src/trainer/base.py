@@ -17,14 +17,28 @@ from superloss import SuperLoss
 logger = logging.getLogger(__name__)
 
 class ProportionalMixCallback(TrainerCallback):
-    def __init__(self, train_dataset, cl_method, sample_difficulty):
+    def __init__(self, train_dataset, cl_method, sample_difficulty, training_type='epoch-based'):
         self.train_dataset = train_dataset
         self.cl_method = cl_method
         self.sample_difficulty = sample_difficulty
         self.num_chunks = 5
         self._last_stage = -1   # For curriculum in step-based training
+        self.training_type = training_type
 
     def on_epoch_begin(self, args, state, control, **kwargs):
+        if self.training_type == 'step-based':
+            return
+
+        curr_epoch = state.epoch if state.epoch is not None else 0
+        num_train_epochs = args.num_train_epochs
+        self.train_dataset.curriculum(curr_epoch, num_train_epochs, self.cl_method, self.sample_difficulty)
+        if int(os.environ.get('RANK')) == 0:
+            print(f"Training dataset updated at epoch {state.epoch}")
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        if self.training_type == 'epoch-based':
+            return
+
         curr_epoch = state.epoch if state.epoch is not None else 0
         num_train_epochs = args.num_train_epochs
         self.train_dataset.curriculum(curr_epoch, num_train_epochs, self.cl_method, self.sample_difficulty)
@@ -46,7 +60,7 @@ class ProportionalMixCallback(TrainerCallback):
             return  # In the same stage, no need to update the dataset
         self._last_stage = stage
 
-        self.train_dataset.curriculum(curr_step, total_steps, self.cl_method, self.sample_difficulty)
+        self.train_dataset.curriculum_step_based(curr_step, total_steps, self.cl_method, self.sample_difficulty)
 
 
 class FinetuneTrainer(Trainer):
@@ -69,7 +83,8 @@ class FinetuneTrainer(Trainer):
         elif self.cl_cfg.method in ['easy_to_hard', 'hard_to_easy']:
             self.sample_difficulty = torch.load(
                 f'saves/sample_difficulty/{self.cl_cfg.data_name}/{self.cl_cfg.split}/{self.cl_cfg.difficulty_metric}.pt')
-            self.add_callback(ProportionalMixCallback(self.train_dataset, self.cl_cfg.method, self.sample_difficulty))
+            training_type = 'step-based' if self.args.max_steps > 0 else 'epoch-based'
+            self.add_callback(ProportionalMixCallback(self.train_dataset, self.cl_cfg.method, self.sample_difficulty, training_type))
             logger.warning('************ Using Easy-to-Hard or Hard-to-Easy Ordering! ************')
 
         else:
