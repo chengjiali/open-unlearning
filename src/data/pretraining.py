@@ -1,4 +1,7 @@
 # import torch
+import os
+import pickle
+import torch.distributed as dist
 from torch.utils.data import Dataset
 from data.utils import (
     load_hf_dataset,
@@ -66,8 +69,25 @@ class PretrainingDataset(Dataset):
         super(PretrainingDataset, self).__init__()
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.chunks = self._chunk_raw_text(load_hf_dataset(**hf_args)[text_key])
+        # self.chunks = self._chunk_raw_text(load_hf_dataset(**hf_args)[text_key])
 
+        if 'wmdp' in hf_args['data_files']:
+            if 'cyber' in hf_args['data_files']:
+                split_name = 'cyber'
+            elif 'bio' in hf_args['data_files']:
+                split_name = 'bio'
+
+            if 'forget' in hf_args['data_files']:
+                forget_retain = 'forget'
+            elif 'retain' in hf_args['data_files']:
+                forget_retain = 'retain'
+
+            if os.path.exists(f"data/chunked-wmdp-{split_name}-{forget_retain}.pkl"):
+                with open(f"data/chunked-wmdp-{split_name}-{forget_retain}.pkl", 'rb') as f:
+                    self.chunks = pickle.load(f).chunks
+            else:
+                raise NotImplementedError('Please run `python src/build_wmdp_data.py` first to cache WMDP dataset.')
+                
     def _chunk_raw_text(self, raw_text):
         raw_text = "\n\n".join(raw_text)
         full_token_sequence = self.tokenizer(raw_text, add_special_tokens=False)[
