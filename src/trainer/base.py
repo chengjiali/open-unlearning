@@ -17,17 +17,17 @@ from superloss import SuperLoss
 logger = logging.getLogger(__name__)
 
 class ProportionalMixCallback(TrainerCallback):
-    def __init__(self, train_dataset, cl_method, sample_difficlty):
+    def __init__(self, train_dataset, cl_method, sample_difficulty):
         self.train_dataset = train_dataset
         self.cl_method = cl_method
-        self.sample_difficlty = sample_difficlty
+        self.sample_difficulty = sample_difficulty
         self.num_chunks = 5
         self._last_stage = -1   # For curriculum in step-based training
 
     def on_epoch_begin(self, args, state, control, **kwargs):
         curr_epoch = state.epoch if state.epoch is not None else 0
         num_train_epochs = args.num_train_epochs
-        self.train_dataset.curriculum(curr_epoch, num_train_epochs, self.cl_method, self.sample_difficlty)
+        self.train_dataset.curriculum(curr_epoch, num_train_epochs, self.cl_method, self.sample_difficulty)
         if int(os.environ.get('RANK')) == 0:
             print(f"Training dataset updated at epoch {state.epoch}")
 
