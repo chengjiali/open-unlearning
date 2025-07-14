@@ -10,6 +10,7 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 from typing import Any
 
 import torch
+import torch.nn as nn
 from transformers import TrainerCallback
 from superloss import SuperLoss
 
@@ -20,6 +21,7 @@ class ProportionalMixCallback(TrainerCallback):
         self.train_dataset = train_dataset
         self.cl_method = cl_method
         self.sample_difficlty = sample_difficlty
+        self._last_stage = -1   # For curriculum in step-based training
 
     def on_epoch_begin(self, args, state, control, **kwargs):
         curr_epoch = state.epoch if state.epoch is not None else 0
@@ -27,6 +29,23 @@ class ProportionalMixCallback(TrainerCallback):
         self.train_dataset.curriculum(curr_epoch, num_train_epochs, self.cl_method, self.sample_difficlty)
         if int(os.environ.get('RANK')) == 0:
             print(f"Training dataset updated at epoch {state.epoch}")
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        # Only works when args.max_steps is set (default args.max_steps is -1)
+        if args.max_steps <= 0:
+            return
+
+        curr_step = state.global_step
+        total_steps = args.max_steps
+
+        # Only call curriculum when stage is updated
+        chunk_size = total_steps / self.n_chunks
+        stage = int(curr_step // chunk_size)
+        if stage == self._last_stage:
+            return  # In the same stage, no need to update the dataset
+        self._last_stage = stage
+
+        self.train_dataset.curriculum(curr_step, total_steps, self.cl_method, self.sample_difficulty)
 
 
 class FinetuneTrainer(Trainer):
