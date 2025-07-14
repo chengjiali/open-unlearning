@@ -41,6 +41,28 @@ class ForgetRetainDataset(Dataset):
         if int(os.environ.get('RANK')) == 0:
             print(f"[Curriculum]: Epoch {curr_epoch} | Using {max_stage}/{num_chunks} chunks | {len(self.selected_indices)}/{len(sorted_indices)} samples")
 
+    def curriculum_step_based(self, curr_step, num_train_steps, cl_method, sample_difficulty):
+        # Curriculum configuration
+        num_chunks = num_train_steps // 16  # 5 chunks for 80 steps
+        if cl_method == 'hard_to_easy':
+            descending = True
+        elif cl_method == 'easy_to_hard':
+            descending=False
+        else:
+            raise
+
+        # Current training epoch
+        chunk_size = num_train_steps / num_chunks
+        curr_stage = int(curr_step // chunk_size)
+        curr_stage = min(curr_stage, num_chunks)
+
+        # Sort by difficulty and create curriculum chunks
+        sorted_indices = torch.argsort(sample_difficulty, descending=descending)
+        chunks = torch.chunk(sorted_indices, num_chunks)
+        self.selected_indices = torch.cat(chunks[: curr_stage]).tolist()
+        if int(os.environ.get('RANK')) == 0:
+            print(f"[Curriculum]: Step {curr_stage} | Using {curr_stage}/{num_chunks} chunks | {len(self.selected_indices)}/{len(sorted_indices)} samples")
+
     def __len__(self):
         """Ensures the sampled dataset matches the anchor dataset's length."""
         if self.anchor == "forget":
