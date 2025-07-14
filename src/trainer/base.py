@@ -21,6 +21,7 @@ class ProportionalMixCallback(TrainerCallback):
         self.train_dataset = train_dataset
         self.cl_method = cl_method
         self.sample_difficlty = sample_difficlty
+        self.num_chunks = 5
         self._last_stage = -1   # For curriculum in step-based training
 
     def on_epoch_begin(self, args, state, control, **kwargs):
@@ -39,7 +40,7 @@ class ProportionalMixCallback(TrainerCallback):
         total_steps = args.max_steps
 
         # Only call curriculum when stage is updated
-        chunk_size = total_steps / self.n_chunks
+        chunk_size = total_steps / self.num_chunks
         stage = int(curr_step // chunk_size)
         if stage == self._last_stage:
             return  # In the same stage, no need to update the dataset
