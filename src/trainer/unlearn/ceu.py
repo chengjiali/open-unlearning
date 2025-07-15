@@ -58,10 +58,10 @@ def cross_entropy_unlearning_loss(
     return F.cross_entropy(
         input=valid_logits,
         target=valid_target_probabilities,
+        reduction='none'
     )
 
-
-def compute_batch_ceu(model, inputs, ignore_first_n_answer_tokens=1):
+def compute_batch_ceu_per_token(model, inputs, ignore_first_n_answer_tokens=1, return_shifted_labels=False):
     outputs = model(**inputs)
     logits = outputs.logits
     labels = inputs["labels"]
@@ -75,10 +75,43 @@ def compute_batch_ceu(model, inputs, ignore_first_n_answer_tokens=1):
 
     shifted_labels = labels_without_first_n_answer_tokens[..., 1:].contiguous()
     shifted_logits = logits[..., :-1, :].contiguous()
-    loss = cross_entropy_unlearning_loss(
+    loss_per_token = cross_entropy_unlearning_loss(
         shifted_logits, shifted_labels, ignore_index=-100
     )
-    return loss, outputs
+    if return_shifted_labels:
+        return loss_per_token, outputs, shifted_labels
+    else:
+        return loss_per_token, outputs
+
+def compute_batch_ceu(model, inputs, ignore_first_n_answer_tokens=1):
+    loss, outputs = compute_batch_ceu_per_token(model, inputs, ignore_first_n_answer_tokens)
+    return loss.mean(), outputs
+
+def compute_batch_ceu_per_sample(model, inputs, ignore_first_n_answer_tokens=1):
+    loss_per_token, outputs, shifted_labels = compute_batch_ceu_per_token(model, inputs, ignore_first_n_answer_tokens, return_shifted_labels=True)
+    loss_per_sample = _token2sample_loss(loss_per_token, shifted_labels != -100)
+    return loss_per_sample, outputs
+
+def _token2sample_loss(
+    loss_per_token: torch.Tensor,   # [num_valid_tokens]
+    valid_mask: torch.Tensor,       # [batch_size, seq_len]  bool
+):
+    batch_size, seq_len = valid_mask.shape
+    # 1. check which sample each token belongs to
+    #    flatten (0,0)…(0,L-1),(1,0)… and align with loss_per_token
+    sample_id_full = torch.arange(batch_size, device=loss_per_token.device).repeat_interleave(seq_len)
+    sample_id_valid = sample_id_full[valid_mask.flatten()]         # [num_valid_tokens]
+
+    # 2. scatter_add / bincount to accumulate loss_per_token to each sample
+    per_sample_loss = torch.zeros(batch_size, device=loss_per_token.device)
+    per_sample_loss.scatter_add_(0, sample_id_valid, loss_per_token)
+
+    valid_counts = torch.zeros(batch_size, device=loss_per_token.device)
+    valid_counts.scatter_add_(0, sample_id_valid,
+                                torch.ones_like(loss_per_token))
+    per_sample_loss = per_sample_loss / valid_counts.clamp(min=1)
+
+    return per_sample_loss
 
 
 class CEU(UnlearnTrainer):
@@ -93,4 +126,24 @@ class CEU(UnlearnTrainer):
             forget_inputs,
             ignore_first_n_answer_tokens=self.ignore_first_n_answer_tokens,
         )
+        return (loss, outputs) if return_outputs else loss
+    
+    def compute_loss_per_token_superloss(self, model, inputs, return_outputs=False):
+        forget_inputs = inputs["forget"]
+        loss_per_token, outputs = compute_batch_ceu_per_token(
+            model,
+            forget_inputs,
+            ignore_first_n_answer_tokens=self.ignore_first_n_answer_tokens,
+        )
+        loss = self.calculate_superloss(loss_per_token)
+        return (loss, outputs) if return_outputs else loss
+    
+    def compute_loss_per_sample_superloss(self, model, inputs, return_outputs=False):
+        forget_inputs = inputs["forget"]
+        loss_per_sample, outputs = compute_batch_ceu_per_sample(
+            model,
+            forget_inputs,
+            ignore_first_n_answer_tokens=self.ignore_first_n_answer_tokens,
+        )
+        loss = self.calculate_superloss(loss_per_sample)
         return (loss, outputs) if return_outputs else loss

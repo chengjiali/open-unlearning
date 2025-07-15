@@ -69,44 +69,86 @@ class FinetuneTrainer(Trainer):
         self.template_args = template_args
         self.cl_cfg = cl_cfg
         super().__init__(*args, **kwargs)
+        self.model_config = self.model.config
         self.setup_cl()
 
     def setup_cl(self):
-        self.compute_loss = self.compute_loss_normal
+        '''Setup for Curriculum Learning.
+            For SuperLoss, overwrite the existing self.compute_loss() method. 
+            For difficulty-based curriculum, add callback to chunk data
+        '''
 
-        if self.cl_cfg.method == 'superloss':
+        if 'superloss' in self.cl_cfg.method:
             # Initialize SuperLoss calculator for Curriculum Learning
             self.super_loss = SuperLoss('sl', lam=self.cl_cfg.lam, C=self.cl_cfg.C, mode='avg')
-            self.compute_loss = self.compute_loss_superloss
-            logger.warning('************ Using SuperLoss! ************')
+
+            if self.cl_cfg.method == 'per_sample_superloss':
+                self.compute_loss = self.compute_loss_per_sample_superloss
+                logger.warning('************ Using Per-Sample SuperLoss! ************')
+
+            elif self.cl_cfg.method == 'per_token_superloss':
+                self.compute_loss = self.compute_loss_per_token_superloss
+                logger.warning('************ Using Per-Token SuperLoss! ************')
+
 
         elif self.cl_cfg.method in ['easy_to_hard', 'hard_to_easy']:
             self.sample_difficulty = torch.load(
                 f'saves/sample_difficulty/{self.cl_cfg.data_name}/{self.cl_cfg.split}/{self.cl_cfg.difficulty_metric}.pt')
-            training_type = 'step-based' if self.args.max_steps > 0 else 'epoch-based'
-            self.add_callback(ProportionalMixCallback(self.train_dataset, self.cl_cfg.method, self.sample_difficulty, training_type))
+            self.add_callback(ProportionalMixCallback(self.train_dataset, self.cl_cfg.method, self.sample_difficulty))
             logger.warning('************ Using Easy-to-Hard or Hard-to-Easy Ordering! ************')
 
         else:
             logger.warning('************ No CL used! ************')
 
-    # def compute_loss(self, model, inputs, return_outputs=False):
-    #     if self.cl_cfg is None or self.cl_cfg == 'none' or self.cl_cfg.method is None or self.cl_cfg.method == 'none':
-    #         return self.compute_loss_normal(model, inputs, return_outputs)
-    #     elif self.cl_cfg.method == 'superloss':
-    #         return self.compute_loss_superloss(model, inputs, return_outputs)
-    #     elif self.cl_cfg.method in ['easy_to_hard', 'hard_to_easy']:
-    #         return self.compute_loss_normal(model, inputs, return_outputs)
-    #     else:
-    #         raise ValueError(f"{self.cl_cfg.method} should be None or in ['none', 'superloss', 'easy_to_hard', 'hard_to_easy']")
+    def _convert_per_token_loss_to_per_sample_loss(self, loss_per_token, labels):
+        ## Get per-sample loss
+        # Step 1: Reshape to [batch_size, seq_len - 1]
+        batch_size, seq_len = labels.shape
+        loss_per_token = loss_per_token.view(batch_size, seq_len - 1)
+
+        # Step 2: Mask padding tokens (if label uses -100 to ignore)
+        shift_labels = labels[..., 1:].contiguous()
+        mask = (shift_labels.view(batch_size, seq_len - 1) != -100).float()
+
+        # Step 3: Sum (or average) over the sequence to get per-sample loss
+        loss_per_sample = (loss_per_token * mask).sum(dim=1) / mask.sum(dim=1)
+
+        return loss_per_sample
+
+    def compute_causal_lm_loss_per_token(self, logits, labels, remove_ignore_index=True):
+        '''Compute the per-token loss. Output loss size = number of tokens in each batch.'''
+
+        ## Original Causal LM loss with reduction='none'
+        logits = logits.float()
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        loss_fct = nn.CrossEntropyLoss(reduction='none')
+        shift_logits = shift_logits.view(-1, self.model_config.vocab_size)
+        shift_labels = shift_labels.view(-1)
+        shift_labels = shift_labels.to(shift_logits.device)
+        loss_per_token = loss_fct(shift_logits, shift_labels) # shape: [batch_size * (seq_len - 1)]
+        if remove_ignore_index:
+            loss_per_token = loss_per_token[shift_labels.view(-1) != -100] # Remove tokens that are ignored like padding
+        
+        return loss_per_token
+
+    def compute_causal_lm_loss_per_sample(self, logits, labels):
+        '''Compute the per-token loss. Output loss size = batch size.'''
+
+        loss_per_token = self.compute_causal_lm_loss_per_token(logits, labels, remove_ignore_index=False)
+        loss_per_sample = self._convert_per_token_loss_to_per_sample_loss(loss_per_token, labels)
+
+        return loss_per_sample
 
     def calculate_superloss(self, per_sample_loss):
+        '''Apply SuperLoss, i.e. weighted average'''
+
         conf, tau, tau_adjusted = self.super_loss(per_sample_loss, None, None)
         tau = [tau] * per_sample_loss.shape[0]
         tau_adjusted = [tau_adjusted] * per_sample_loss.shape[0]
         sl_loss = per_sample_loss * conf
 
-        return sl_loss
+        return sl_loss.mean()
 
 
     # def _get_train_sampler(self, train_dataset: Optional[Dataset] = None) -> Optional[torch.utils.data.Sampler]:

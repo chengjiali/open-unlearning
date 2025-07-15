@@ -11,14 +11,14 @@ trainers=(
     "SimNPO"
     "RMU"
     "UNDIAL"
-    "AltPO"
     "SatImp"
     "WGA"
     "CEU"
 )
 cls=(
     "none"
-    "superloss"
+    "per_token_superloss"
+    "per_sample_superloss"
     "easy_to_hard"
     "hard_to_easy"
 )
@@ -60,11 +60,11 @@ for data_split in "${data_splits[@]}"; do
             for cl in "${cls[@]}"; do
 
                 # CL = SuperLoss
-                if [[ "$cl" == "superloss" ]]; then
+                if [[ "$cl" == "per_token_superloss" || "$cl" == "per_sample_superloss" ]]; then
                     for lam in 0.1 1 10; do
                         task_name=${cl}/C_2_lam_${lam}/wmdp_${model}_${data_split}_${trainer}
 
-                        if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
+                        if [ ! -f saves/unlearn/"${task_name}"/evals/LMEval_SUMMARY.json ]; then
                             if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                                 echo "${task_name}" "Model Not Found"
                                 
@@ -91,7 +91,7 @@ for data_split in "${data_splits[@]}"; do
                     for metric in loss prob exact_mem extraction_strength; do
                         task_name=${cl}/${metric}/wmdp_${model}_${data_split}_${trainer}
 
-                        if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
+                        if [ ! -f saves/unlearn/"${task_name}"/evals/LMEval_SUMMARY.json ]; then
                             if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                                 echo "${task_name}" "Model Not Found"
 
@@ -118,11 +118,13 @@ for data_split in "${data_splits[@]}"; do
                 elif [[ "$cl" == "none" ]]; then 
                     task_name=${cl}/wmdp_${model}_${data_split}_${trainer}
 
-                    if [ ! -f saves/unlearn/"${task_name}"/evals/WMDP_SUMMARY.json ]; then
+                    if [ ! -f saves/unlearn/"${task_name}"/evals/LMEval_SUMMARY.json ]; then
                         if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                             echo "${task_name}" "Model Not Found"
 
-                            eval ${TRAIN_CMD} trainer.cl.method="none"
+                            eval ${TRAIN_CMD} \
+                            task_name=${task_name} \
+                            trainer.cl.method="none"
                         fi
 
                         if [ -f saves/unlearn/"${task_name}"/model.safetensors ] || [ -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then

@@ -116,6 +116,27 @@ class RMU(GradDiff):
         num_tokens = mask.sum(dim=-1, keepdim=True)  # Sum over seq_len, Shape: [b, 1]
         return (squared_diff_sum / num_tokens).mean()
 
+    def compute_activation_loss_per_token(self, activation1, activation2, mask):
+        squared_diff = torch.nn.functional.mse_loss(
+            activation1, activation2, reduction="none"
+        )  # Shape (b, s, d)
+        expanded_mask = mask.unsqueeze(-1).expand_as(squared_diff)  # Shape: [b, s, d]
+        squared_diff_sum = (
+            (squared_diff * expanded_mask).mean(dim=2)
+        )  # Shape: [b * s, 1]
+        return squared_diff_sum[mask].float()
+    
+    def compute_activation_loss_per_sample(self, activation1, activation2, mask):
+        squared_diff = torch.nn.functional.mse_loss(
+            activation1, activation2, reduction="none"
+        )  # Shape (b, s, d)
+        expanded_mask = mask.unsqueeze(-1).expand_as(squared_diff)  # Shape: [b, s, d]
+        squared_diff_sum = (
+            (squared_diff * expanded_mask).mean(dim=2).sum(dim=(1))
+        )  # Shape: [b, 1]
+        num_tokens = mask.sum(dim=-1)
+        return (squared_diff_sum / num_tokens).float()
+
     def compute_retain_loss(self, model, retain_inputs):
         retain_loss = 0.0
 
@@ -135,8 +156,48 @@ class RMU(GradDiff):
         else:
             retain_loss = super().compute_retain_loss(model, retain_inputs)
         return retain_loss
+    
+    def compute_retain_loss_per_token(self, model, retain_inputs):
+        retain_loss = 0.0
 
-    def compute_loss_superloss(self, model, inputs, return_outputs=False):
+        if self.retain_loss_type == "EMBED_DIFF":
+            model_retain_activations, _ = self.forward_with_cache(
+                model, retain_inputs, module=self.model_module, no_grad=False
+            )
+            ref_retain_activations, _ = self.forward_with_cache(
+                self.ref_model, retain_inputs, module=self.ref_module, no_grad=True
+            )
+            mask = retain_inputs["labels"] != -100  # Shape: [b, s]
+            retain_loss = self.compute_activation_loss_per_token(
+                model_retain_activations,
+                ref_retain_activations.to(model_retain_activations.device),
+                mask,
+            )
+        else:
+            retain_loss = super().compute_retain_loss_per_token(model, retain_inputs)
+        return retain_loss
+
+    def compute_retain_loss_per_sample(self, model, retain_inputs):
+        retain_loss = 0.0
+
+        if self.retain_loss_type == "EMBED_DIFF":
+            model_retain_activations, _ = self.forward_with_cache(
+                model, retain_inputs, module=self.model_module, no_grad=False
+            )
+            ref_retain_activations, _ = self.forward_with_cache(
+                self.ref_model, retain_inputs, module=self.ref_module, no_grad=True
+            )
+            mask = retain_inputs["labels"] != -100  # Shape: [b, s]
+            retain_loss = self.compute_activation_loss_per_sample(
+                model_retain_activations,
+                ref_retain_activations.to(model_retain_activations.device),
+                mask,
+            )
+        else:
+            retain_loss = super().compute_retain_loss_per_token(model, retain_inputs)
+        return retain_loss
+
+    def compute_loss(self, model, inputs, return_outputs=False):
         forget_inputs = inputs["forget"]
         forget_inputs = {
             "input_ids": forget_inputs["input_ids"],
@@ -159,9 +220,6 @@ class RMU(GradDiff):
         forget_loss = self.compute_activation_loss(
             model_forget_activations, control_vec, mask
         )
-        bs = forget_inputs['input_ids'].shape[0]
-        forget_loss = forget_loss.view(bs, -1).sum(-1)
-        forget_loss = self.calculate_superloss(forget_loss).mean()
 
         retain_inputs = inputs["retain"]
         retain_inputs = {
@@ -170,14 +228,12 @@ class RMU(GradDiff):
             "labels": retain_inputs["labels"],
         }
         retain_loss = self.compute_retain_loss(model=model, retain_inputs=retain_inputs)
-        retain_loss = retain_loss.view(bs, -1).sum(-1)
-        retain_loss = self.calculate_superloss(retain_loss).mean()
 
         loss = self.gamma * forget_loss + self.alpha * retain_loss
 
         return (loss, forget_outputs) if return_outputs else loss
 
-    def compute_loss_normal(self, model, inputs, return_outputs=False):
+    def compute_loss_per_token_superloss(self, model, inputs, return_outputs=False):
         forget_inputs = inputs["forget"]
         forget_inputs = {
             "input_ids": forget_inputs["input_ids"],
@@ -197,9 +253,10 @@ class RMU(GradDiff):
         )
         control_vec = control_vec.expand_as(model_forget_activations)
         mask = forget_inputs["labels"] != -100  # Shape: [b, s]
-        forget_loss = self.compute_activation_loss(
+        forget_loss_per_token = self.compute_activation_loss_per_token(
             model_forget_activations, control_vec, mask
         )
+        forget_loss = self.calculate_superloss(forget_loss_per_token)
 
         retain_inputs = inputs["retain"]
         retain_inputs = {
@@ -207,7 +264,46 @@ class RMU(GradDiff):
             "attention_mask": retain_inputs["attention_mask"],
             "labels": retain_inputs["labels"],
         }
-        retain_loss = self.compute_retain_loss(model=model, retain_inputs=retain_inputs)
+        retain_loss_per_token = self.compute_retain_loss_per_token(model=model, retain_inputs=retain_inputs)
+        retain_loss = self.calculate_superloss(retain_loss_per_token)
+
+        loss = self.gamma * forget_loss + self.alpha * retain_loss
+
+        return (loss, forget_outputs) if return_outputs else loss
+
+    def compute_loss_per_sample_superloss(self, model, inputs, return_outputs=False):
+        forget_inputs = inputs["forget"]
+        forget_inputs = {
+            "input_ids": forget_inputs["input_ids"],
+            "attention_mask": forget_inputs["attention_mask"],
+            "labels": forget_inputs["labels"],
+        }
+
+        model_forget_activations, forget_outputs = self.forward_with_cache(
+            model, forget_inputs, self.model_module, no_grad=False
+        )
+        # If multiple datasets or concepts need unlearning, pass the control vector during processing; otherwise, default to a random vector during training.
+        control_vec = forget_inputs.get(
+            "control_vec", self.get_control_vector(model_forget_activations.shape[-1])
+        )
+        control_vec = control_vec.to(
+            dtype=model_forget_activations.dtype, device=model_forget_activations.device
+        )
+        control_vec = control_vec.expand_as(model_forget_activations)
+        mask = forget_inputs["labels"] != -100  # Shape: [b, s]
+        forget_loss_per_sample = self.compute_activation_loss_per_sample(
+            model_forget_activations, control_vec, mask
+        )
+        forget_loss = self.calculate_superloss(forget_loss_per_sample)
+
+        retain_inputs = inputs["retain"]
+        retain_inputs = {
+            "input_ids": retain_inputs["input_ids"],
+            "attention_mask": retain_inputs["attention_mask"],
+            "labels": retain_inputs["labels"],
+        }
+        retain_loss_per_sample = self.compute_retain_loss_per_sample(model=model, retain_inputs=retain_inputs)
+        retain_loss = self.calculate_superloss(retain_loss_per_sample)
 
         loss = self.gamma * forget_loss + self.alpha * retain_loss
 

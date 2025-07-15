@@ -2,6 +2,7 @@ import torch.nn.functional as F
 
 from trainer.utils import compute_batch_nll
 from trainer.unlearn.grad_diff import GradDiff
+from .npo import compute_batch_nll_per_token
 
 
 class SimNPO(GradDiff):
@@ -10,17 +11,12 @@ class SimNPO(GradDiff):
         self.delta = delta
         self.beta = beta
 
-    def compute_loss_superloss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False):
         forget_inputs = inputs["forget"]
 
         forget_labels = forget_inputs["labels"]
         loss_mask = forget_labels != -100
         forget_loss, forget_outputs = compute_batch_nll(model, forget_inputs)
-
-        bs = forget_inputs['input_ids'].shape[0]
-        forget_loss = forget_loss.view(bs, -1).sum(-1)
-        forget_loss = self.calculate_superloss(forget_loss).mean()
-
         forget_loss = forget_loss / loss_mask.sum(-1) - self.delta
         forget_loss = -F.logsigmoid(self.beta * forget_loss).mean() * 2 / self.beta
 
@@ -31,21 +27,19 @@ class SimNPO(GradDiff):
             "labels": retain_inputs["labels"],
         }
         retain_loss = self.compute_retain_loss(model=model, retain_inputs=retain_inputs)
-        retain_loss = retain_loss.view(bs, -1).sum(-1)
-        retain_loss = self.calculate_superloss(retain_loss).mean()
 
         loss = self.gamma * forget_loss + self.alpha * retain_loss
-
         return (loss, forget_outputs) if return_outputs else loss
-
-    def compute_loss_normal(self, model, inputs, return_outputs=False):
+    
+    def compute_loss_per_token_superloss(self, model, inputs, return_outputs=False):
         forget_inputs = inputs["forget"]
 
         forget_labels = forget_inputs["labels"]
         loss_mask = forget_labels != -100
-        forget_loss, forget_outputs = compute_batch_nll(model, forget_inputs)
-        forget_loss = forget_loss / loss_mask.sum(-1) - self.delta
-        forget_loss = -F.logsigmoid(self.beta * forget_loss).mean() * 2 / self.beta
+        forget_loss_per_token, forget_outputs = compute_batch_nll_per_token(model, forget_inputs)
+        # forget_loss_per_token = forget_loss_per_token / loss_mask.sum(-1) - self.delta
+        forget_loss_per_token = -F.logsigmoid(self.beta * forget_loss_per_token) * 2 / self.beta
+        forget_loss = self.calculate_superloss(forget_loss_per_token)
 
         retain_inputs = inputs["retain"]
         retain_inputs = {
@@ -53,7 +47,30 @@ class SimNPO(GradDiff):
             "attention_mask": retain_inputs["attention_mask"],
             "labels": retain_inputs["labels"],
         }
-        retain_loss = self.compute_retain_loss(model=model, retain_inputs=retain_inputs)
+        retain_loss_per_token = self.compute_retain_loss_per_token(model=model, retain_inputs=retain_inputs)
+        retain_loss = self.calculate_superloss(retain_loss_per_token)
+
+        loss = self.gamma * forget_loss + self.alpha * retain_loss
+        return (loss, forget_outputs) if return_outputs else loss
+
+    def compute_loss_per_sample_superloss(self, model, inputs, return_outputs=False):
+        forget_inputs = inputs["forget"]
+
+        forget_labels = forget_inputs["labels"]
+        loss_mask = forget_labels != -100
+        forget_loss_per_sample, forget_outputs = compute_batch_nll(model, forget_inputs)    # This is already per-sample loss
+        forget_loss_per_sample = forget_loss_per_sample / loss_mask.sum(-1) - self.delta
+        forget_loss_per_sample = -F.logsigmoid(self.beta * forget_loss_per_sample) * 2 / self.beta
+        forget_loss = self.calculate_superloss(forget_loss_per_sample)
+
+        retain_inputs = inputs["retain"]
+        retain_inputs = {
+            "input_ids": retain_inputs["input_ids"],
+            "attention_mask": retain_inputs["attention_mask"],
+            "labels": retain_inputs["labels"],
+        }
+        retain_loss_per_sample = self.compute_retain_loss_per_sample(model=model, retain_inputs=retain_inputs)
+        retain_loss = self.calculate_superloss(retain_loss_per_sample)
 
         loss = self.gamma * forget_loss + self.alpha * retain_loss
         return (loss, forget_outputs) if return_outputs else loss

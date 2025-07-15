@@ -11,14 +11,14 @@ trainers=(
     "SimNPO"
     "RMU"
     "UNDIAL"
-    "AltPO"
     "SatImp"
     "WGA"
     "CEU"
 )
 cls=(
     "none"
-    "superloss"
+    "per_sample_superloss"
+    "per_token_superloss"
     "easy_to_hard"
     "hard_to_easy"
 )
@@ -62,7 +62,7 @@ for data_split in "${data_splits[@]}"; do
             for cl in "${cls[@]}"; do
 
                 # CL = SuperLoss
-                if [[ "$cl" == "superloss" ]]; then
+                if [[ "$cl" == "per_token_superloss" || "$cl" == "per_sample_superloss" ]]; then
                     for lam in 0.1 1 10; do
                         task_name=${cl}/C_2_lam_${lam}/muse_${model}_${data_split}_${trainer}
 
@@ -124,7 +124,9 @@ for data_split in "${data_splits[@]}"; do
                         if [ ! -f saves/unlearn/"${task_name}"/model.safetensors ] && [ ! -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then
                             echo "${task_name}" "Model Not Found"
 
-                            eval ${TRAIN_CMD} trainer.cl.method="none"
+                            eval ${TRAIN_CMD} \
+                            task_name=${task_name} \
+                            trainer.cl.method="none"
                         fi
 
                         if [ -f saves/unlearn/"${task_name}"/model.safetensors ] || [ -f saves/unlearn/"${task_name}"/model.safetensors.index.json ]; then

@@ -38,8 +38,32 @@ class GradDiff(UnlearnTrainer):
                 f"{self.retain_loss_type} not implemented for retain set"
             )
         return retain_loss
+    
+    def compute_retain_loss_per_token(self, model, retain_inputs, remove_ignore_index=True):
+        retain_outputs = model(**retain_inputs)
+        retain_loss = 0.0
+        if self.retain_loss_type == "NLL":
+            retain_per_token_loss = self.compute_causal_lm_loss_per_token(retain_outputs.logits, retain_inputs['labels'], remove_ignore_index=remove_ignore_index)
+            retain_loss += retain_per_token_loss
+        elif self.retain_loss_type == "KL":
+            raise NotImplementedError
+            kl_loss, retain_outputs = compute_kl_divergence(
+                self.model, self.ref_model, retain_inputs
+            )
+            retain_loss += kl_loss
+        else:
+            raise NotImplementedError(
+                f"{self.retain_loss_type} not implemented for retain set"
+            )
+        return retain_loss
 
-    def compute_loss_normal(self, model, inputs, return_outputs=False):
+    def compute_retain_loss_per_sample(self, model, retain_inputs):
+        retain_loss_per_token = self.compute_retain_loss_per_token(model, retain_inputs, remove_ignore_index=False)
+        retain_loss_per_sample = self._convert_per_token_loss_to_per_sample_loss(retain_loss_per_token, retain_inputs['labels'])
+
+        return retain_loss_per_sample
+
+    def compute_loss(self, model, inputs, return_outputs=False):
         forget_inputs = inputs["forget"]
         forget_inputs = {
             "input_ids": forget_inputs["input_ids"],
@@ -62,7 +86,7 @@ class GradDiff(UnlearnTrainer):
 
         return (loss, forget_outputs) if return_outputs else loss
 
-    def compute_loss_superloss(self, model, inputs, return_outputs=False):
+    def compute_loss_per_token_superloss(self, model, inputs, return_outputs=False):
         forget_inputs = inputs["forget"]
         forget_inputs = {
             "input_ids": forget_inputs["input_ids"],
@@ -71,11 +95,9 @@ class GradDiff(UnlearnTrainer):
         }
 
         forget_outputs = model(**forget_inputs)
-        forget_loss = -forget_outputs.loss
-
-        bs = forget_inputs['input_ids'].shape[0]
-        forget_loss = forget_loss.view(bs, -1).sum(-1)
-        forget_loss = self.calculate_superloss(forget_loss).mean()
+        forget_loss_per_token = self.compute_causal_lm_loss_per_token(forget_outputs.logits, forget_inputs['labels'])
+        forget_loss = self.calculate_superloss(forget_loss_per_token)
+        forget_loss = -forget_loss
 
         retain_inputs = inputs["retain"]
         retain_inputs = {
@@ -83,9 +105,34 @@ class GradDiff(UnlearnTrainer):
             "attention_mask": retain_inputs["attention_mask"],
             "labels": retain_inputs["labels"],
         }
-        retain_loss = self.compute_retain_loss(model=model, retain_inputs=retain_inputs)
-        retain_loss = retain_loss.view(bs, -1).sum(-1)
-        retain_loss = self.calculate_superloss(retain_loss).mean()
+        retain_loss_per_token = self.compute_retain_loss_per_token(model=model, retain_inputs=retain_inputs)
+        retain_loss = self.calculate_superloss(retain_loss_per_token)
+
+        loss = self.gamma * forget_loss + self.alpha * retain_loss
+
+        return (loss, forget_outputs) if return_outputs else loss
+
+    def compute_loss_per_sample_superloss(self, model, inputs, return_outputs=False):
+        forget_inputs = inputs["forget"]
+        forget_inputs = {
+            "input_ids": forget_inputs["input_ids"],
+            "attention_mask": forget_inputs["attention_mask"],
+            "labels": forget_inputs["labels"],
+        }
+
+        forget_outputs = model(**forget_inputs)
+        forget_loss_per_sample = self.compute_causal_lm_loss_per_sample(forget_outputs.logits, forget_inputs['labels'])
+        forget_loss = self.calculate_superloss(forget_loss_per_sample)
+        forget_loss = -forget_loss
+
+        retain_inputs = inputs["retain"]
+        retain_inputs = {
+            "input_ids": retain_inputs["input_ids"],
+            "attention_mask": retain_inputs["attention_mask"],
+            "labels": retain_inputs["labels"],
+        }
+        retain_loss_per_sample = self.compute_retain_loss_per_sample(model=model, retain_inputs=retain_inputs)
+        retain_loss = self.calculate_superloss(retain_loss_per_sample)
 
         loss = self.gamma * forget_loss + self.alpha * retain_loss
 
