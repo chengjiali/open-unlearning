@@ -20,7 +20,7 @@ def wandb_setup(cfg):
 
     if cl_method == 'none':
         name += [cl_method,]
-    elif cl_method == 'superloss':
+    elif cl_method in ['per_token_superloss', 'per_sample_superloss']:
         C = re.search(r'C_(\d+)', parts[1]).group(1)
         lam = re.search(r'lam_([\d.]+)', parts[1]).group(1)
         name += [cl_method, C, lam]
