@@ -69,9 +69,8 @@ class PretrainingDataset(Dataset):
         super(PretrainingDataset, self).__init__()
         self.tokenizer = tokenizer
         self.max_length = max_length
-        # self.chunks = self._chunk_raw_text(load_hf_dataset(**hf_args)[text_key])
 
-        if 'wmdp' in hf_args['data_files']:
+        if 'data_files' in hf_args and 'wmdp' in hf_args['data_files']:
             if 'cyber' in hf_args['data_files']:
                 split_name = 'cyber'
             elif 'bio' in hf_args['data_files']:
@@ -87,6 +86,9 @@ class PretrainingDataset(Dataset):
                     self.chunks = pickle.load(f).chunks
             else:
                 raise NotImplementedError('Please run `python src/build_wmdp_data.py` first to cache WMDP dataset.')
+        
+        else:
+            self.chunks = self._chunk_raw_text(load_hf_dataset(**hf_args)[text_key])
                 
     def _chunk_raw_text(self, raw_text):
         raw_text = "\n\n".join(raw_text)
