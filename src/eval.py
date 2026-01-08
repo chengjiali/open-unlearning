@@ -11,6 +11,8 @@ from evals import get_evaluators
 def wandb_setup(cfg):
     parts = cfg.get('task_name').strip().split('/')
     cl_method = parts[0]
+    if 'phi-1_5' in parts[-1]:
+        parts[-1] = parts[-1].replace('phi-1_5', 'phi-1.5')
     data, model, split, unlearn_method = parts[-1].split('_')
 
     project = 'Curriculum Unlearning'
