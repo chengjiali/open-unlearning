@@ -54,7 +54,7 @@ class ForgetRetainDataset(Dataset):
         # Current training epoch
         chunk_size = num_train_steps / num_chunks
         curr_stage = int(curr_step // chunk_size)
-        curr_stage = min(curr_stage, num_chunks+1)
+        curr_stage = min(num_chunks, curr_stage + 1)
 
         # Sort by difficulty and create curriculum chunks
         sorted_indices = torch.argsort(sample_difficulty, descending=descending)
