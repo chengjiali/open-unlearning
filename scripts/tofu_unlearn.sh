@@ -1,5 +1,6 @@
 #!/bin/bash
 
+export NCCL_P2P_DISABLE=1  # Disable P2P if needed
 
 export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
 echo "Master Port: $MASTER_PORT"
@@ -13,7 +14,6 @@ trainers=(
     "UNDIAL"
     "SatImp"
     "WGA"
-    "CEU"
 )
 cls=(
     "none"
@@ -23,8 +23,8 @@ cls=(
     "hard_to_easy"
 )
 models=(
-    # "Llama-3.2-1B-Instruct"
-    # "Llama-3.2-3B-Instruct"
+    "Llama-3.2-1B-Instruct"
+    "Llama-3.2-3B-Instruct"
     "Llama-3.1-8B-Instruct"
 )
 splits=(
@@ -48,22 +48,39 @@ for split in "${splits[@]}"; do
         for trainer in "${trainers[@]}"; do
             model_path=open-unlearning/tofu_${model}_full
 
-            TRAIN_CMD="CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
-            src/train.py --config-name=unlearn.yaml \
-            experiment=unlearn/tofu/default.yaml \
-            trainer=${trainer} \
-            model=${model} \
-            forget_split=${forget_split} \
-            retain_split=${retain_split} \
-            model.model_args.pretrained_model_name_or_path=${model_path} \
-            retain_logs_path=saves/eval/tofu_${model}_${retain_split}/TOFU_EVAL.json \
-            trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
-            trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
-            trainer.args.ddp_find_unused_parameters=true \
-            trainer.args.gradient_checkpointing=true \
-            trainer.args.eval_strategy=no"
+            if [[ "$model" == "Llama-3.1-8B-Instruct" ]]; then
+                TRAIN_CMD="CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
+                src/train.py --config-name=unlearn.yaml \
+                experiment=unlearn/tofu/default.yaml \
+                trainer=${trainer} \
+                model=${model} \
+                forget_split=${forget_split} \
+                retain_split=${retain_split} \
+                model.model_args.pretrained_model_name_or_path=${model_path} \
+                retain_logs_path=saves/eval/tofu_${model}_${retain_split}/TOFU_EVAL.json \
+                trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
+                trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
+                trainer.args.ddp_find_unused_parameters=true \
+                trainer.args.gradient_checkpointing=true \
+                trainer.args.eval_strategy=no"
+            else
+                TRAIN_CMD="CUDA_VISIBLE_DEVICES=6,7 accelerate launch --config_file configs/accelerate/default_config_2.yaml --main_process_port $MASTER_PORT \
+                src/train.py --config-name=unlearn.yaml \
+                experiment=unlearn/tofu/default.yaml \
+                trainer=${trainer} \
+                model=${model} \
+                forget_split=${forget_split} \
+                retain_split=${retain_split} \
+                model.model_args.pretrained_model_name_or_path=${model_path} \
+                retain_logs_path=saves/eval/tofu_${model}_${retain_split}/TOFU_EVAL.json \
+                trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
+                trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
+                trainer.args.ddp_find_unused_parameters=true \
+                trainer.args.gradient_checkpointing=true \
+                trainer.args.eval_strategy=no"
+            fi
 
-            EVAL_CMD="CUDA_VISIBLE_DEVICES=4 python src/eval.py \
+            EVAL_CMD="CUDA_VISIBLE_DEVICES=5 python src/eval.py \
             experiment=eval/tofu/default.yaml \
             model=${model} \
             forget_split=${forget_split} \

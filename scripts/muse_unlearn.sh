@@ -1,5 +1,6 @@
 #!/bin/bash
 
+export NCCL_P2P_DISABLE=1  # Disable P2P if needed
 
 export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
 echo "Master Port: $MASTER_PORT"
@@ -13,7 +14,6 @@ trainers=(
     "UNDIAL"
     "SatImp"
     "WGA"
-    "CEU"
 )
 cls=(
     "none"

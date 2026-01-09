@@ -1,5 +1,6 @@
 #!/bin/bash
 
+export NCCL_P2P_DISABLE=1  # Disable P2P if needed
 
 export MASTER_PORT=$(python -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
 echo "Master Port: $MASTER_PORT"
@@ -13,7 +14,6 @@ trainers=(
     "UNDIAL"
     "SatImp"
     "WGA"
-    "CEU"
 )
 cls=(
     "none"
@@ -24,6 +24,8 @@ cls=(
 )
 models=(
     zephyr-7b-beta
+    Phi-3.5-mini-instruct
+    phi-1_5
 )
 data_splits=(
     "cyber"
@@ -40,17 +42,34 @@ for data_split in "${data_splits[@]}"; do
     for model in "${models[@]}"; do
         for trainer in "${trainers[@]}"; do
 
-            TRAIN_CMD="CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
-            src/train.py --config-name=unlearn.yaml \
-            experiment=unlearn/wmdp/default.yaml \
-            trainer=${trainer} \
-            model=${model} \
-            data_split=${data_split} \
-            trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
-            trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
-            trainer.args.ddp_find_unused_parameters=true \
-            trainer.args.gradient_checkpointing=true \
-            trainer.args.eval_strategy=no"
+            if [[ "$model" == "zephyr-7b-beta" ]]; then
+                TRAIN_CMD="CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --config_file configs/accelerate/default_config.yaml --main_process_port $MASTER_PORT \
+                src/train.py --config-name=unlearn.yaml \
+                experiment=unlearn/wmdp/default.yaml \
+                trainer=${trainer} \
+                model=${model} \
+                data_split=${data_split} \
+                trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
+                trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
+                trainer.args.ddp_find_unused_parameters=true \
+                trainer.args.gradient_checkpointing=true \
+                trainer.args.eval_strategy=no"
+            else
+                per_device_train_batch_size=4 # on two gpus would make effective batch size 32
+                gradient_accumulation_steps=4
+
+                TRAIN_CMD="CUDA_VISIBLE_DEVICES=2,4 accelerate launch --config_file configs/accelerate/default_config_2.yaml --main_process_port $MASTER_PORT \
+                src/train.py --config-name=unlearn.yaml \
+                experiment=unlearn/wmdp/default.yaml \
+                trainer=${trainer} \
+                model=${model} \
+                data_split=${data_split} \
+                trainer.args.per_device_train_batch_size=${per_device_train_batch_size} \
+                trainer.args.gradient_accumulation_steps=${gradient_accumulation_steps} \
+                trainer.args.ddp_find_unused_parameters=true \
+                trainer.args.gradient_checkpointing=true \
+                trainer.args.eval_strategy=no"
+            fi
 
             EVAL_CMD="CUDA_VISIBLE_DEVICES=4 python src/eval.py \
             experiment=eval/wmdp/default.yaml \
