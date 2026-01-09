@@ -37,6 +37,8 @@ Links to research papers and resources corresponding to implemented features in 
 | SatImp               | Paper[📄](https://arxiv.org/pdf/2505.11953), Code [🐙](https://github.com/Puning97/SatImp-for-LLM-Unlearning)                                                                                      |
 | WGA (G-effect)       | Paper[📄](https://arxiv.org/pdf/2502.19301), Code [🐙](https://github.com/tmlr-group/G-effect)                                                                                                     |
 | CE-U (Cross-Entropy unlearning)       | Paper[📄](https://arxiv.org/pdf/2503.01224)                                                                                                     |
+| PDU                  | Paper [📄](https://arxiv.org/abs/2506.05314) |
+
 
 ---
 
@@ -75,6 +77,7 @@ Links to research papers and resources corresponding to implemented features in 
 
 - [TOFU Benchmark (original)](https://github.com/locuslab/tofu)
 - [MUSE Benchmark (original)](https://github.com/swj0419/muse_bench)
+- [Unlearning Comparator](https://github.com/gnueaj/Machine-Unlearning-Comparator)
 - [Awesome LLM Unlearning](https://github.com/chrisliu298/awesome-llm-unlearning)
 - [Awesome Machine Unlearning](https://github.com/tamlhp/awesome-machine-unlearning)
 - [Awesome GenAI Unlearning](https://github.com/franciscoliu/Awesome-GenAI-Unlearning)
